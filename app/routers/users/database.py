@@ -1,11 +1,16 @@
 from fastapi import HTTPException, status
-from pymongo import MongoClient
+import pymongo
+
 from pydantic import BaseModel
 from typing import Optional
 import os
 import uuid
+from dotenv import load_dotenv
 
-from .utils import get_password_hash
+from ...utils import get_password_hash
+
+load_dotenv()
+
 
 class UserFields(BaseModel):
     email: str
@@ -15,8 +20,9 @@ class UserFields(BaseModel):
 
 
 class User(UserFields):
-    is_active: bool = True
-    is_superuser: bool = False
+    uuid: uuid.UUID
+    isActive: bool = True
+    isSuperuser: bool = False
 
 
 class UserCreate(UserFields):
@@ -30,54 +36,105 @@ class UserUpdate(BaseModel):
 
 
 class UserDB(User):
-    id: uuid.UUID
-    hashed_password: str
+    hashedPassword: str
+
 
 class UserShort(BaseModel):
     username: str
     name: str
     lastname: str
 
+
+def prepare_colletion(colletion):
+    colletion.create_index("username", unique=True)
+    colletion.create_index("email", unique=True)
+    colletion.create_index("uuid", unique=True)
+
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-client = MongoClient(DATABASE_URL)
-
+client = pymongo.MongoClient(DATABASE_URL)
 db = client["platform"]
 
-users_db = db["users"]
+users_collection = db["users"]
+prepare_colletion(users_collection)
 
-users_db.create_index("username", unique=True)
-users_db.create_index("email", unique=True)
+db_testing = False
+fake_users_collection = None
+
+
+def get_collection():
+    if not db_testing:
+        return users_collection
+    else:
+        return fake_users_collection
+
+
+def set_fake_collection():
+    global db_testing, fake_users_collection
+    db_testing = True
+    fake_users_collection = db["fake_users"]
+    prepare_colletion(fake_users_collection)
+
+
+def reset_fake_collection():
+    if not (fake_users_collection is None):
+        fake_users_collection.delete_many({})
+
+
+def delete_fake_collection():
+    global db_testing, fake_users_collection
+    db_testing = False
+    fake_users_collection = None
+    db.drop_collection("fake_users")
+
 
 def add_user(user: UserCreate):
-    if users_db.find_one({"username": user.username}):
+    collection = get_collection()
+
+    if collection.find_one({"username": user.username}):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username is already taken"
         )
 
-    if users_db.find_one({"email": user.email}):
+    if collection.find_one({"email": user.email}):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already taken"
         )
 
+    new_uuid = uuid.uuid4()
+
+    while collection.find_one({"uuid": new_uuid}):
+        new_uuid = uuid.uuid4()
+
     userDB = UserDB(
         **dict(user),
-        hashed_password=get_password_hash(user.password),
-        id=uuid.uuid1()
+        hashedPassword=get_password_hash(user.password),
+        uuid=new_uuid,
     )
-    
-    users_db.insert_one(dict(userDB))
 
-    return get_user(userDB.username)
+    collection.insert_one(dict(userDB))
+
+    return get_user(userDB.uuid)
 
 
-def get_user(username: str):
-    user = users_db.find_one({"username": username})
+def get_user(uuid: uuid.UUID = None, username: str = None):
+    collection = get_collection()
+    search_parameters = {
+        **({} if uuid is None else {"uuid": uuid}),
+        **({} if username is None else {"username": username}),
+    }
+    user = collection.find_one(search_parameters)
+    if not user:
+        return None
     return UserDB(**user)
 
+
 def get_users():
-    #users = users_db.find({"is_active": True})
-    users = users_db.find()
-    return [UserDB(**user) for user in users]
+    collection = get_collection()
+    # users = db.find({"isActive": True})
+    users = collection.find()
+    return [User(**user) for user in users]
+

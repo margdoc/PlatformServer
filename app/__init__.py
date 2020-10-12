@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 
-from .routers import users_router, auth_router, decrypto_router
+from .routers import users_router, auth_router, games_router
 
 app = FastAPI()
 
@@ -30,7 +31,11 @@ app.include_router(
 )
 
 app.include_router(
-    decrypto_router,
-    prefix="/decrypto",
-    tags=["decrypto"]
+    games_router,
+    prefix="/games",
+    tags=["games"]
 )
+
+for route in app.routes:
+    if isinstance(route, APIRoute):
+        route.operation_id = route.name
