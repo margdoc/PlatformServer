@@ -6,7 +6,7 @@ Enter
 ```
 uvicorn main:app
 ```
-to run server. It will be running on localhost on port 8000. To see swagger, go to "/docs".
+to run server. It will be running on localhost on port `8000`. To see api documentation go to `/docs`.
 
 ## Requirements
 
